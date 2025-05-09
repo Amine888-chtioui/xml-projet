@@ -30,10 +30,17 @@ class MaintenanceStatsController extends Controller
         // Récupérer les filtres de la requête
         $filters = $this->getFiltersFromRequest($request);
         
-        // Utiliser le repository pour obtenir les statistiques
-        $stats = $this->maintenanceRepository->getMaintenanceStats($filters);
-        
-        return response()->json($stats);
+        try {
+            // Utiliser le repository pour obtenir les statistiques
+            $stats = $this->maintenanceRepository->getMaintenanceStats($filters);
+            
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -43,15 +50,22 @@ class MaintenanceStatsController extends Controller
      */
     public function getSummary()
     {
-        $summary = [
-            'total_incidents' => Downtime::count(),
-            'total_downtime' => Downtime::sum('duration_minutes'),
-            'total_machines' => Machine::count(),
-            'avg_downtime_per_incident' => Downtime::avg('duration_minutes') ?? 0,
-            'last_updated' => XmlReport::max('created_at'),
-        ];
-        
-        return response()->json($summary);
+        try {
+            $summary = [
+                'total_incidents' => Downtime::count(),
+                'total_downtime' => Downtime::sum('duration_minutes'),
+                'total_machines' => Machine::count(),
+                'avg_downtime' => Downtime::avg('duration_minutes') ?? 0,
+                'last_updated' => XmlReport::max('created_at'),
+            ];
+            
+            return response()->json($summary);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération du résumé: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -61,11 +75,18 @@ class MaintenanceStatsController extends Controller
      */
     public function getMachines()
     {
-        $machines = Machine::select('machine_id as id', 'name')
-            ->orderBy('name')
-            ->get();
-            
-        return response()->json($machines);
+        try {
+            $machines = Machine::select('machine_id as id', 'name')
+                ->orderBy('name')
+                ->get();
+                
+            return response()->json($machines);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des machines: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -75,12 +96,19 @@ class MaintenanceStatsController extends Controller
      */
     public function getErrorTypes()
     {
-        $errorTypes = Downtime::select('error_type as id', 'error_type as name')
-            ->distinct()
-            ->orderBy('error_type')
-            ->get();
-            
-        return response()->json($errorTypes);
+        try {
+            $errorTypes = Downtime::select('error_type as id', 'error_type as name')
+                ->distinct()
+                ->orderBy('error_type')
+                ->get();
+                
+            return response()->json($errorTypes);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des types d\'erreur: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -91,25 +119,32 @@ class MaintenanceStatsController extends Controller
      */
     public function getTimeEvolution(Request $request)
     {
-        $filters = $this->getFiltersFromRequest($request);
-        
-        // Construire la requête de base
-        $query = Downtime::query();
-        
-        // Appliquer les filtres
-        $this->applyFilters($query, $filters);
-        
-        // Regrouper par jour
-        $timeEvolution = $query->select(
-                DB::raw('DATE(start_time) as date'),
-                DB::raw('SUM(duration_minutes) as total_downtime'),
-                DB::raw('COUNT(*) as incident_count')
-            )
-            ->groupBy(DB::raw('DATE(start_time)'))
-            ->orderBy('date')
-            ->get();
+        try {
+            $filters = $this->getFiltersFromRequest($request);
             
-        return response()->json($timeEvolution);
+            // Construire la requête de base
+            $query = Downtime::query();
+            
+            // Appliquer les filtres
+            $this->applyFilters($query, $filters);
+            
+            // Regrouper par jour
+            $timeEvolution = $query->select(
+                    DB::raw('DATE(start_time) as date'),
+                    DB::raw('SUM(duration_minutes) as total_downtime'),
+                    DB::raw('COUNT(*) as incident_count')
+                )
+                ->groupBy(DB::raw('DATE(start_time)'))
+                ->orderBy('date')
+                ->get();
+                
+            return response()->json($timeEvolution);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération de l\'évolution temporelle: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -120,29 +155,36 @@ class MaintenanceStatsController extends Controller
      */
     public function getStatsByMachine(Request $request)
     {
-        $filters = $this->getFiltersFromRequest($request);
-        
-        // Construire la requête de base
-        $query = Downtime::query()
-            ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id');
+        try {
+            $filters = $this->getFiltersFromRequest($request);
             
-        // Appliquer les filtres
-        $this->applyFilters($query, $filters);
-        
-        // Statistiques par machine
-        $statsByMachine = $query
-            ->select(
-                'machines.machine_id',
-                'machines.name',
-                DB::raw('SUM(duration_minutes) as total_downtime'),
-                DB::raw('COUNT(*) as incident_count'),
-                DB::raw('AVG(duration_minutes) as avg_downtime')
-            )
-            ->groupBy('machines.machine_id', 'machines.name')
-            ->orderBy('total_downtime', 'desc')
-            ->get();
+            // Construire la requête de base
+            $query = Downtime::query()
+                ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id');
+                
+            // Appliquer les filtres
+            $this->applyFilters($query, $filters);
             
-        return response()->json($statsByMachine);
+            // Statistiques par machine
+            $statsByMachine = $query
+                ->select(
+                    'machines.machine_id',
+                    'machines.name',
+                    DB::raw('SUM(duration_minutes) as total_downtime'),
+                    DB::raw('COUNT(*) as incident_count'),
+                    DB::raw('AVG(duration_minutes) as avg_downtime')
+                )
+                ->groupBy('machines.machine_id', 'machines.name')
+                ->orderBy('total_downtime', 'desc')
+                ->get();
+                
+            return response()->json($statsByMachine);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques par machine: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -153,27 +195,34 @@ class MaintenanceStatsController extends Controller
      */
     public function getStatsByErrorType(Request $request)
     {
-        $filters = $this->getFiltersFromRequest($request);
-        
-        // Construire la requête de base
-        $query = Downtime::query();
+        try {
+            $filters = $this->getFiltersFromRequest($request);
             
-        // Appliquer les filtres
-        $this->applyFilters($query, $filters);
-        
-        // Statistiques par type d'erreur
-        $statsByErrorType = $query
-            ->select(
-                'error_type',
-                DB::raw('SUM(duration_minutes) as total_downtime'),
-                DB::raw('COUNT(*) as incident_count'),
-                DB::raw('AVG(duration_minutes) as avg_downtime')
-            )
-            ->groupBy('error_type')
-            ->orderBy('total_downtime', 'desc')
-            ->get();
+            // Construire la requête de base
+            $query = Downtime::query();
+                
+            // Appliquer les filtres
+            $this->applyFilters($query, $filters);
             
-        return response()->json($statsByErrorType);
+            // Statistiques par type d'erreur
+            $statsByErrorType = $query
+                ->select(
+                    'error_type',
+                    DB::raw('SUM(duration_minutes) as total_downtime'),
+                    DB::raw('COUNT(*) as incident_count'),
+                    DB::raw('AVG(duration_minutes) as avg_downtime')
+                )
+                ->groupBy('error_type')
+                ->orderBy('total_downtime', 'desc')
+                ->get();
+                
+            return response()->json($statsByErrorType);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques par type d\'erreur: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -184,37 +233,44 @@ class MaintenanceStatsController extends Controller
      */
     public function getCriticalIssues(Request $request)
     {
-        $filters = $this->getFiltersFromRequest($request);
-        
-        // Seuil de temps d'arrêt considéré comme critique (en minutes)
-        $criticalThreshold = $request->input('threshold', 120); // 2 heures par défaut
-        
-        // Construire la requête de base
-        $query = Downtime::query()
-            ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id')
-            ->where('duration_minutes', '>=', $criticalThreshold);
+        try {
+            $filters = $this->getFiltersFromRequest($request);
             
-        // Appliquer les filtres
-        $this->applyFilters($query, $filters);
-        
-        // Récupérer les incidents critiques
-        $criticalIssues = $query
-            ->select(
-                'downtimes.id',
-                'downtimes.downtime_id',
-                'machines.name as machine_name',
-                'downtimes.start_time',
-                'downtimes.end_time',
-                'downtimes.duration_minutes',
-                'downtimes.error_code',
-                'downtimes.error_type',
-                'downtimes.description'
-            )
-            ->orderBy('duration_minutes', 'desc')
-            ->limit(10)
-            ->get();
+            // Seuil de temps d'arrêt considéré comme critique (en minutes)
+            $criticalThreshold = $request->input('threshold', 120); // 2 heures par défaut
             
-        return response()->json($criticalIssues);
+            // Construire la requête de base
+            $query = Downtime::query()
+                ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id')
+                ->where('duration_minutes', '>=', $criticalThreshold);
+                
+            // Appliquer les filtres
+            $this->applyFilters($query, $filters);
+            
+            // Récupérer les incidents critiques
+            $criticalIssues = $query
+                ->select(
+                    'downtimes.id',
+                    'downtimes.downtime_id',
+                    'machines.name as machine_name',
+                    'downtimes.start_time',
+                    'downtimes.end_time',
+                    'downtimes.duration_minutes',
+                    'downtimes.error_code',
+                    'downtimes.error_type',
+                    'downtimes.description'
+                )
+                ->orderBy('duration_minutes', 'desc')
+                ->limit(10)
+                ->get();
+                
+            return response()->json($criticalIssues);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des problèmes critiques: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -224,52 +280,59 @@ class MaintenanceStatsController extends Controller
      */
     public function getDashboardStats()
     {
-        // Statistiques globales
-        $summary = $this->getSummary()->original;
-        
-        // Top 5 machines avec le plus de temps d'arrêt
-        $topMachines = Downtime::query()
-            ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id')
-            ->select(
-                'machines.name',
-                DB::raw('SUM(duration_minutes) as total_downtime'),
-                DB::raw('COUNT(*) as incident_count')
-            )
-            ->groupBy('machines.name')
-            ->orderBy('total_downtime', 'desc')
-            ->limit(5)
-            ->get();
+        try {
+            // Statistiques globales
+            $summary = $this->getSummary()->original;
             
-        // Top 5 types d'erreur
-        $topErrorTypes = Downtime::query()
-            ->select(
-                'error_type',
-                DB::raw('SUM(duration_minutes) as total_downtime'),
-                DB::raw('COUNT(*) as incident_count')
-            )
-            ->groupBy('error_type')
-            ->orderBy('total_downtime', 'desc')
-            ->limit(5)
-            ->get();
+            // Top 5 machines avec le plus de temps d'arrêt
+            $topMachines = Downtime::query()
+                ->join('machines', 'downtimes.machine_id', '=', 'machines.machine_id')
+                ->select(
+                    'machines.name',
+                    DB::raw('SUM(duration_minutes) as total_downtime'),
+                    DB::raw('COUNT(*) as incident_count')
+                )
+                ->groupBy('machines.name')
+                ->orderBy('total_downtime', 'desc')
+                ->limit(5)
+                ->get();
+                
+            // Top 5 types d'erreur
+            $topErrorTypes = Downtime::query()
+                ->select(
+                    'error_type',
+                    DB::raw('SUM(duration_minutes) as total_downtime'),
+                    DB::raw('COUNT(*) as incident_count')
+                )
+                ->groupBy('error_type')
+                ->orderBy('total_downtime', 'desc')
+                ->limit(5)
+                ->get();
+                
+            // Évolution des arrêts sur les 30 derniers jours
+            $thirtyDaysAgo = Carbon::now()->subDays(30)->startOfDay();
             
-        // Évolution des arrêts sur les 30 derniers jours
-        $thirtyDaysAgo = Carbon::now()->subDays(30)->startOfDay();
-        
-        $timeEvolution = Downtime::where('start_time', '>=', $thirtyDaysAgo)
-            ->select(
-                DB::raw('DATE(start_time) as date'),
-                DB::raw('SUM(duration_minutes) as total_downtime')
-            )
-            ->groupBy(DB::raw('DATE(start_time)'))
-            ->orderBy('date')
-            ->get();
-            
-        return response()->json([
-            'summary' => $summary,
-            'by_machine' => $topMachines,
-            'by_error_type' => $topErrorTypes,
-            'time_evolution' => $timeEvolution
-        ]);
+            $timeEvolution = Downtime::where('start_time', '>=', $thirtyDaysAgo)
+                ->select(
+                    DB::raw('DATE(start_time) as date'),
+                    DB::raw('SUM(duration_minutes) as total_downtime')
+                )
+                ->groupBy(DB::raw('DATE(start_time)'))
+                ->orderBy('date')
+                ->get();
+                
+            return response()->json([
+                'summary' => $summary,
+                'by_machine' => $topMachines,
+                'by_error_type' => $topErrorTypes,
+                'time_evolution' => $timeEvolution
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques du tableau de bord: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     /**
@@ -280,71 +343,78 @@ class MaintenanceStatsController extends Controller
      */
     public function getPerformanceIndicators(Request $request)
     {
-        $period = $request->input('period', 'month'); // 'week', 'month', 'quarter', 'year'
-        
-        // Déterminer la date de début de la période
-        switch ($period) {
-            case 'week':
-                $startDate = Carbon::now()->subDays(7)->startOfDay();
-                $previousStartDate = Carbon::now()->subDays(14)->startOfDay();
-                break;
-            case 'month':
-                $startDate = Carbon::now()->subDays(30)->startOfDay();
-                $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
-                break;
-            case 'quarter':
-                $startDate = Carbon::now()->subDays(90)->startOfDay();
-                $previousStartDate = Carbon::now()->subDays(180)->startOfDay();
-                break;
-            case 'year':
-                $startDate = Carbon::now()->subDays(365)->startOfDay();
-                $previousStartDate = Carbon::now()->subDays(730)->startOfDay();
-                break;
-            default:
-                $startDate = Carbon::now()->subDays(30)->startOfDay();
-                $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
-                break;
+        try {
+            $period = $request->input('period', 'month'); // 'week', 'month', 'quarter', 'year'
+            
+            // Déterminer la date de début de la période
+            switch ($period) {
+                case 'week':
+                    $startDate = Carbon::now()->subDays(7)->startOfDay();
+                    $previousStartDate = Carbon::now()->subDays(14)->startOfDay();
+                    break;
+                case 'month':
+                    $startDate = Carbon::now()->subDays(30)->startOfDay();
+                    $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
+                    break;
+                case 'quarter':
+                    $startDate = Carbon::now()->subDays(90)->startOfDay();
+                    $previousStartDate = Carbon::now()->subDays(180)->startOfDay();
+                    break;
+                case 'year':
+                    $startDate = Carbon::now()->subDays(365)->startOfDay();
+                    $previousStartDate = Carbon::now()->subDays(730)->startOfDay();
+                    break;
+                default:
+                    $startDate = Carbon::now()->subDays(30)->startOfDay();
+                    $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
+                    break;
+            }
+            
+            // Incidents et temps d'arrêt pour la période actuelle
+            $currentStats = Downtime::where('start_time', '>=', $startDate)
+                ->select(
+                    DB::raw('COUNT(*) as incident_count'),
+                    DB::raw('SUM(duration_minutes) as total_downtime')
+                )
+                ->first();
+                
+            // Incidents et temps d'arrêt pour la période précédente
+            $previousStats = Downtime::where('start_time', '>=', $previousStartDate)
+                ->where('start_time', '<', $startDate)
+                ->select(
+                    DB::raw('COUNT(*) as incident_count'),
+                    DB::raw('SUM(duration_minutes) as total_downtime')
+                )
+                ->first();
+                
+            // Calculer les variations
+            $incidentVariation = $previousStats && $previousStats->incident_count > 0
+                ? (($currentStats->incident_count - $previousStats->incident_count) / $previousStats->incident_count) * 100
+                : 0;
+                
+            $downtimeVariation = $previousStats && $previousStats->total_downtime > 0
+                ? (($currentStats->total_downtime - $previousStats->total_downtime) / $previousStats->total_downtime) * 100
+                : 0;
+                
+            // Temps d'arrêt moyen
+            $avgDowntime = $currentStats->incident_count > 0
+                ? $currentStats->total_downtime / $currentStats->incident_count
+                : 0;
+                
+            return response()->json([
+                'period' => $period,
+                'incident_count' => $currentStats->incident_count,
+                'total_downtime' => $currentStats->total_downtime,
+                'avg_downtime' => $avgDowntime,
+                'incident_variation' => round($incidentVariation, 2),
+                'downtime_variation' => round($downtimeVariation, 2),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des indicateurs de performance: ' . $e->getMessage()
+            ], 500);
         }
-        
-        // Incidents et temps d'arrêt pour la période actuelle
-        $currentStats = Downtime::where('start_time', '>=', $startDate)
-            ->select(
-                DB::raw('COUNT(*) as incident_count'),
-                DB::raw('SUM(duration_minutes) as total_downtime')
-            )
-            ->first();
-            
-        // Incidents et temps d'arrêt pour la période précédente
-        $previousStats = Downtime::where('start_time', '>=', $previousStartDate)
-            ->where('start_time', '<', $startDate)
-            ->select(
-                DB::raw('COUNT(*) as incident_count'),
-                DB::raw('SUM(duration_minutes) as total_downtime')
-            )
-            ->first();
-            
-        // Calculer les variations
-        $incidentVariation = $previousStats->incident_count > 0
-            ? (($currentStats->incident_count - $previousStats->incident_count) / $previousStats->incident_count) * 100
-            : 0;
-            
-        $downtimeVariation = $previousStats->total_downtime > 0
-            ? (($currentStats->total_downtime - $previousStats->total_downtime) / $previousStats->total_downtime) * 100
-            : 0;
-            
-        // Temps d'arrêt moyen
-        $avgDowntime = $currentStats->incident_count > 0
-            ? $currentStats->total_downtime / $currentStats->incident_count
-            : 0;
-            
-        return response()->json([
-            'period' => $period,
-            'incident_count' => $currentStats->incident_count,
-            'total_downtime' => $currentStats->total_downtime,
-            'avg_downtime' => $avgDowntime,
-            'incident_variation' => round($incidentVariation, 2),
-            'downtime_variation' => round($downtimeVariation, 2),
-        ]);
     }
     
     /**

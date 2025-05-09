@@ -31,7 +31,14 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Gérer les erreurs 401 (non autorisé) - redirection vers la page de connexion
+    console.error('API Error:', error);
+    
+    // Si l'erreur est une 404, on peut logger plus de détails
+    if (error.response && error.response.status === 404) {
+      console.error('API 404 Error for URL:', error.config.url);
+    }
+    
+    // Gérer les erreurs 401 (non autorisé)
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user');
@@ -55,12 +62,16 @@ export const authService = {
 };
 
 export const xmlService = {
-  uploadXml: (formData) => api.post('/upload-xml', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  }),
+  uploadXml: (formData, config = {}) => {
+    return api.post('/upload-xml', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      ...config
+    });
+  },
   getUploadHistory: () => api.get('/upload-history'),
+  getLatestReports: () => api.get('/latest-reports'),
 };
 
 export const statsService = {

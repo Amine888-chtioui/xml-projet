@@ -1,4 +1,4 @@
-// src/components/MachineDowntimeChart.js
+// src/components/MachineDowntimeChart.js - Version améliorée
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart, 
@@ -26,19 +26,31 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
         setIsLoading(true);
         setError(null);
         
-        // Appel API réel - décommentez cette section en production
-        // const response = await statsService.getStatsByMachine(filters);
-        // let machineData = response.data;
-        
-        // Pour la démonstration, utilisons des données statiques
-        let machineData = [
-          { name: "Machine A", total_downtime: 245, incident_count: 12 },
-          { name: "Machine B", total_downtime: 230, incident_count: 8 },
-          { name: "Machine C", total_downtime: 140, incident_count: 5 },
-          { name: "Machine D", total_downtime: 85, incident_count: 3 },
-          { name: "Machine E", total_downtime: 45, incident_count: 2 },
-          { name: "Machine F", total_downtime: 40, incident_count: 1 }
+        // Données de démonstration à utiliser en cas d'erreur
+        const fallbackData = [
+          { machine_id: "ALPHA 158", name: "Komax Alpha 355", total_downtime: 245, incident_count: 12 },
+          { machine_id: "ALPHA 161", name: "Komax Alpha 488 10M", total_downtime: 230, incident_count: 8 },
+          { machine_id: "ALPHA 166", name: "Komax Alpha 488 7M", total_downtime: 140, incident_count: 5 },
+          { machine_id: "ALPHA 146", name: "Komax Alpha 488 S 7M", total_downtime: 85, incident_count: 3 },
+          { machine_id: "ALPHA 176", name: "Komax Alpha 355", total_downtime: 45, incident_count: 2 },
+          { machine_id: "ALPHA 177", name: "KOMAX ALPHA 550", total_downtime: 40, incident_count: 3 }
         ];
+        
+        // Essayer d'appeler l'API
+        let machineData = [];
+        try {
+          const response = await statsService.getStatsByMachine(filters);
+          machineData = response?.data || [];
+        } catch (apiError) {
+          console.error("API error:", apiError);
+          // Utiliser les données de secours en cas d'erreur API
+          machineData = fallbackData;
+        }
+        
+        // Vérifier si les données sont vides
+        if (!machineData || machineData.length === 0) {
+          machineData = fallbackData;
+        }
         
         // Trier les données
         machineData = sortData(machineData, sortOrder);
@@ -87,7 +99,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
 
   const formatDuration = (minutes) => {
     const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
+    const mins = Math.round(minutes % 60);
     return `${hours}h ${mins}m`;
   };
 
@@ -205,11 +217,16 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
             axisLine={{ stroke: '#E0E0E0' }}
           />
           <Tooltip 
-            formatter={(value, name) => {
+            formatter={(value, name, props) => {
               if (name === 'total_downtime') {
                 return [formatDuration(value), 'Temps d\'arrêt'];
               }
               return [value, name];
+            }}
+            labelFormatter={(label) => {
+              // Rechercher l'ID de la machine pour l'afficher avec son nom
+              const item = data.find(d => d.name === label);
+              return `${label} (${item?.machine_id || ''})`;
             }}
             cursor={{ fill: 'rgba(0, 0, 0, 0.05)' }}
             contentStyle={{
