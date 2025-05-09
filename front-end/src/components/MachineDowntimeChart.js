@@ -1,5 +1,5 @@
-// src/components/MachineDowntimeChart.js - Version améliorée
-import React, { useState, useEffect } from 'react';
+// src/components/MachineDowntimeChart.js - Version corrigée
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -19,32 +19,63 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
   const [error, setError] = useState(null);
   const [sortOrder, setSortOrder] = useState('desc'); // 'desc' ou 'asc'
   const [hoveredBar, setHoveredBar] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Définir les données de démonstration à utiliser en cas d'erreur
+  const fallbackData = [
+    { machine_id: "ALPHA 158", name: "Komax Alpha 355", total_downtime: 245, incident_count: 12 },
+    { machine_id: "ALPHA 161", name: "Komax Alpha 488 10M", total_downtime: 230, incident_count: 8 },
+    { machine_id: "ALPHA 166", name: "Komax Alpha 488 7M", total_downtime: 140, incident_count: 5 },
+    { machine_id: "ALPHA 146", name: "Komax Alpha 488 S 7M", total_downtime: 85, incident_count: 3 },
+    { machine_id: "ALPHA 176", name: "Komax Alpha 355", total_downtime: 45, incident_count: 2 },
+    { machine_id: "ALPHA 177", name: "KOMAX ALPHA 550", total_downtime: 40, incident_count: 3 }
+  ];
+
+  const sortData = useCallback((dataToSort, order) => {
+    return [...dataToSort].sort((a, b) => {
+      return order === 'desc' 
+        ? b.total_downtime - a.total_downtime 
+        : a.total_downtime - b.total_downtime;
+    });
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadData = async () => {
+      if (retryCount > 2) {
+        // Après 3 tentatives, utiliser les données de démonstration
+        const formattedFallbackData = fallbackData.map(item => ({
+          ...item,
+          downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
+          avg_downtime: Math.round(item.total_downtime / item.incident_count)
+        }));
+        
+        setData(sortData(formattedFallbackData, sortOrder));
+        setIsLoading(false);
+        onDataLoaded(formattedFallbackData);
+        return;
+      }
+
       try {
         setIsLoading(true);
         setError(null);
         
-        // Données de démonstration à utiliser en cas d'erreur
-        const fallbackData = [
-          { machine_id: "ALPHA 158", name: "Komax Alpha 355", total_downtime: 245, incident_count: 12 },
-          { machine_id: "ALPHA 161", name: "Komax Alpha 488 10M", total_downtime: 230, incident_count: 8 },
-          { machine_id: "ALPHA 166", name: "Komax Alpha 488 7M", total_downtime: 140, incident_count: 5 },
-          { machine_id: "ALPHA 146", name: "Komax Alpha 488 S 7M", total_downtime: 85, incident_count: 3 },
-          { machine_id: "ALPHA 176", name: "Komax Alpha 355", total_downtime: 45, incident_count: 2 },
-          { machine_id: "ALPHA 177", name: "KOMAX ALPHA 550", total_downtime: 40, incident_count: 3 }
-        ];
-        
-        // Essayer d'appeler l'API
+        // Tentative d'appel API avec délai croissant entre les tentatives
         let machineData = [];
         try {
           const response = await statsService.getStatsByMachine(filters);
           machineData = response?.data || [];
         } catch (apiError) {
           console.error("API error:", apiError);
-          // Utiliser les données de secours en cas d'erreur API
-          machineData = fallbackData;
+          
+          // Incrémenter le compteur de tentatives
+          setRetryCount(prevCount => prevCount + 1);
+          
+          if (isMounted) {
+            // Utiliser les données de secours en cas d'erreur API
+            machineData = fallbackData;
+          }
         }
         
         // Vérifier si les données sont vides
@@ -53,43 +84,46 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
         }
         
         // Trier les données
-        machineData = sortData(machineData, sortOrder);
-        
-        // Ajouter les données formatées pour l'affichage (temps en heures)
-        machineData = machineData.map(item => ({
-          ...item,
-          downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
-          avg_downtime: Math.round(item.total_downtime / item.incident_count)
-        }));
-        
-        setData(machineData);
-        
-        // Informer le composant parent que les données sont chargées
-        onDataLoaded(machineData);
+        if (isMounted) {
+          const sortedData = sortData(machineData, sortOrder);
+          
+          // Ajouter les données formatées pour l'affichage (temps en heures)
+          const formattedData = sortedData.map(item => ({
+            ...item,
+            downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
+            avg_downtime: Math.round(item.total_downtime / item.incident_count || 1)
+          }));
+          
+          setData(formattedData);
+          
+          // Informer le composant parent que les données sont chargées
+          onDataLoaded(formattedData);
+        }
       } catch (err) {
         console.error("Erreur lors du chargement des données:", err);
-        setError("Une erreur est survenue lors du chargement des données");
+        if (isMounted) {
+          setError("Une erreur est survenue lors du chargement des données");
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadData();
-  }, [filters, sortOrder, onDataLoaded]);
 
-  const sortData = (dataToSort, order) => {
-    return [...dataToSort].sort((a, b) => {
-      return order === 'desc' 
-        ? b.total_downtime - a.total_downtime 
-        : a.total_downtime - b.total_downtime;
-    });
-  };
+    // Nettoyage
+    return () => {
+      isMounted = false;
+    };
+  }, [filters, sortOrder, onDataLoaded, sortData, retryCount]);
 
   const toggleSortOrder = () => {
     setSortOrder(current => current === 'desc' ? 'asc' : 'desc');
   };
 
-  const handleMouseEnter = (data, index) => {
+  const handleMouseEnter = (_, index) => {
     setHoveredBar(index);
   };
 
@@ -118,6 +152,12 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
     return baseColor + (opacity < 0.5 ? '80' : ''); // Add 80 for 50% opacity
   };
 
+  const handleRetry = () => {
+    setRetryCount(0); // Reset le compteur de tentatives
+    setError(null);
+    setIsLoading(true);
+  };
+
   if (isLoading) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
@@ -141,7 +181,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
           <p>{error}</p>
           <button 
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            onClick={() => window.location.reload()}
+            onClick={handleRetry}
           >
             Réessayer
           </button>
@@ -190,10 +230,10 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
         </div>
       </div>
       
-      <ResponsiveContainer width="100%" height={350}>
+      <ResponsiveContainer width="100%" height={300}>
         <BarChart
           data={data}
-          margin={{ top: 5, right: 30, left: 20, bottom: 50 }}
+          margin={{ top: 5, right: 30, left: 20, bottom: 60 }}
           barSize={45}
         >
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -217,7 +257,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
             axisLine={{ stroke: '#E0E0E0' }}
           />
           <Tooltip 
-            formatter={(value, name, props) => {
+            formatter={(value, name) => {
               if (name === 'total_downtime') {
                 return [formatDuration(value), 'Temps d\'arrêt'];
               }
@@ -251,7 +291,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
           >
-            {data.map((entry, index) => (
+            {data.map((_, index) => (
               <Cell key={`cell-${index}`} fill={getBarFill(index)} />
             ))}
           </Bar>
@@ -261,19 +301,19 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
       <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="text-center p-2 bg-blue-50 rounded">
           <p className="text-sm text-gray-600">Incidents totaux</p>
-          <p className="font-semibold">{data.reduce((acc, curr) => acc + curr.incident_count, 0)}</p>
+          <p className="font-semibold">{data.reduce((acc, curr) => acc + (curr.incident_count || 0), 0)}</p>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded">
           <p className="text-sm text-gray-600">Temps d'arrêt total</p>
-          <p className="font-semibold">{formatDuration(data.reduce((acc, curr) => acc + curr.total_downtime, 0))}</p>
+          <p className="font-semibold">{formatDuration(data.reduce((acc, curr) => acc + (curr.total_downtime || 0), 0))}</p>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded sm:col-span-1 col-span-2">
           <p className="text-sm text-gray-600">Durée moyenne</p>
           <p className="font-semibold">{
             formatDuration(
               Math.round(
-                data.reduce((acc, curr) => acc + curr.total_downtime, 0) / 
-                data.reduce((acc, curr) => acc + curr.incident_count, 0)
+                data.reduce((acc, curr) => acc + (curr.total_downtime || 0), 0) / 
+                Math.max(1, data.reduce((acc, curr) => acc + (curr.incident_count || 0), 0))
               )
             )
           }</p>

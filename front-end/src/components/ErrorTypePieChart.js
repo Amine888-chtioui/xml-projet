@@ -1,4 +1,4 @@
-// src/components/ErrorTypePieChart.js
+// src/components/ErrorTypePieChart.js - Version corrigée
 import React, { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, Sector } from 'recharts';
 import { statsService } from '../services/api';
@@ -10,21 +10,38 @@ const ErrorTypePieChart = ({ filters = {} }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeIndex, setActiveIndex] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Données de démonstration à utiliser par défaut
+  const fallbackData = [
+    { error_type: "01 Breakage", total_downtime: 230, incident_count: 12 },
+    { error_type: "02 Wear", total_downtime: 190, incident_count: 15 },
+    { error_type: "04 Blockage", total_downtime: 150, incident_count: 8 },
+    { error_type: "05 Loosening", total_downtime: 100, incident_count: 5 },
+    { error_type: "Preventive", total_downtime: 80, incident_count: 3 }
+  ];
 
   useEffect(() => {
+    let isMounted = true;
+    
     const loadData = async () => {
+      if (retryCount > 2) {
+        // Après 3 tentatives, utiliser les données de démonstration
+        const formattedData = fallbackData.map(item => ({
+          name: item.error_type,
+          value: item.total_downtime,
+          count: item.incident_count,
+          avg: item.total_downtime / item.incident_count
+        }));
+        
+        setData(formattedData);
+        setIsLoading(false);
+        return;
+      }
+      
       try {
         setIsLoading(true);
         setError(null);
-        
-        // Données de démonstration à utiliser par défaut
-        const fallbackData = [
-          { error_type: "01 Breakage", total_downtime: 230, incident_count: 12 },
-          { error_type: "02 Wear", total_downtime: 190, incident_count: 15 },
-          { error_type: "04 Blockage", total_downtime: 150, incident_count: 8 },
-          { error_type: "05 Loosening", total_downtime: 100, incident_count: 5 },
-          { error_type: "Preventive", total_downtime: 80, incident_count: 3 }
-        ];
 
         // Essayer d'appeler l'API
         let errorData = [];
@@ -33,6 +50,12 @@ const ErrorTypePieChart = ({ filters = {} }) => {
           errorData = response?.data || [];
         } catch (apiError) {
           console.error("API error:", apiError);
+          
+          // Incrémenter le compteur de tentatives
+          if (isMounted) {
+            setRetryCount(prevCount => prevCount + 1);
+          }
+          
           // Utiliser les données de secours en cas d'erreur API
           errorData = fallbackData;
         }
@@ -43,24 +66,35 @@ const ErrorTypePieChart = ({ filters = {} }) => {
         }
 
         // Formater les données pour le graphique en camembert
-        const formattedData = errorData.map(item => ({
-          name: item.error_type,
-          value: item.total_downtime,
-          count: item.incident_count,
-          avg: item.total_downtime / item.incident_count
-        }));
+        if (isMounted) {
+          const formattedData = errorData.map(item => ({
+            name: item.error_type,
+            value: item.total_downtime,
+            count: item.incident_count || 0,
+            avg: item.total_downtime / (item.incident_count || 1)
+          }));
 
-        setData(formattedData);
+          setData(formattedData);
+        }
       } catch (err) {
         console.error("Erreur lors du chargement des données:", err);
-        setError("Une erreur est survenue lors du chargement des données");
+        if (isMounted) {
+          setError("Une erreur est survenue lors du chargement des données");
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadData();
-  }, [filters]);
+    
+    // Nettoyage
+    return () => {
+      isMounted = false;
+    };
+  }, [filters, retryCount]);
 
   const handlePieEnter = (_, index) => {
     setActiveIndex(index);
@@ -134,6 +168,12 @@ const ErrorTypePieChart = ({ filters = {} }) => {
     }
     return null;
   };
+  
+  const handleRetry = () => {
+    setRetryCount(0); // Reset le compteur de tentatives
+    setError(null);
+    setIsLoading(true);
+  };
 
   if (isLoading) {
     return (
@@ -158,7 +198,7 @@ const ErrorTypePieChart = ({ filters = {} }) => {
           <p>{error}</p>
           <button
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            onClick={() => window.location.reload()}
+            onClick={handleRetry}
           >
             Réessayer
           </button>
