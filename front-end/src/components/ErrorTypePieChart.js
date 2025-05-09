@@ -1,9 +1,18 @@
-// src/components/ErrorTypePieChart.js - Version corrigée
-import React, { useState, useEffect } from 'react';
+// src/components/ErrorTypePieChart.js - Fixed version
+import React, { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, Sector } from 'recharts';
 import { statsService } from '../services/api';
 
+// Define colors and fallback data outside the component
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#D88884', '#84D888'];
+
+const FALLBACK_DATA = [
+  { error_type: "01 Breakage", total_downtime: 230, incident_count: 12 },
+  { error_type: "02 Wear", total_downtime: 190, incident_count: 15 },
+  { error_type: "04 Blockage", total_downtime: 150, incident_count: 8 },
+  { error_type: "05 Loosening", total_downtime: 100, incident_count: 5 },
+  { error_type: "Preventive", total_downtime: 80, incident_count: 3 }
+];
 
 const ErrorTypePieChart = ({ filters = {} }) => {
   const [data, setData] = useState([]);
@@ -11,75 +20,77 @@ const ErrorTypePieChart = ({ filters = {} }) => {
   const [error, setError] = useState(null);
   const [activeIndex, setActiveIndex] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
-
-  // Données de démonstration à utiliser par défaut
-  const fallbackData = [
-    { error_type: "01 Breakage", total_downtime: 230, incident_count: 12 },
-    { error_type: "02 Wear", total_downtime: 190, incident_count: 15 },
-    { error_type: "04 Blockage", total_downtime: 150, incident_count: 8 },
-    { error_type: "05 Loosening", total_downtime: 100, incident_count: 5 },
-    { error_type: "Preventive", total_downtime: 80, incident_count: 3 }
-  ];
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
     
     const loadData = async () => {
+      // If we've already tried 3 times, use fallback data
       if (retryCount > 2) {
-        // Après 3 tentatives, utiliser les données de démonstration
-        const formattedData = fallbackData.map(item => ({
+        const formattedData = FALLBACK_DATA.map(item => ({
           name: item.error_type,
           value: item.total_downtime,
           count: item.incident_count,
-          avg: item.total_downtime / item.incident_count
+          avg: Math.round(item.total_downtime / item.incident_count)
         }));
         
-        setData(formattedData);
-        setIsLoading(false);
+        if (isMounted) {
+          setData(formattedData);
+          setIsLoading(false);
+          initialLoadDone.current = true;
+        }
+        return;
+      }
+      
+      // If we already have data and there are no new filters, don't fetch again
+      if (initialLoadDone.current && Object.keys(filters).length === 0) {
         return;
       }
       
       try {
-        setIsLoading(true);
-        setError(null);
+        if (isMounted) {
+          setIsLoading(true);
+          setError(null);
+        }
 
-        // Essayer d'appeler l'API
-        let errorData = [];
+        // Try to get data from API
+        let errorData;
         try {
           const response = await statsService.getStatsByErrorType(filters);
           errorData = response?.data || [];
         } catch (apiError) {
           console.error("API error:", apiError);
           
-          // Incrémenter le compteur de tentatives
           if (isMounted) {
             setRetryCount(prevCount => prevCount + 1);
           }
           
-          // Utiliser les données de secours en cas d'erreur API
-          errorData = fallbackData;
+          // Use fallback data on error
+          errorData = FALLBACK_DATA;
         }
 
-        // Vérifier si les données sont vides
+        // If data is empty, use fallback
         if (!errorData || errorData.length === 0) {
-          errorData = fallbackData;
+          errorData = FALLBACK_DATA;
         }
 
-        // Formater les données pour le graphique en camembert
+        // Format data for pie chart
         if (isMounted) {
           const formattedData = errorData.map(item => ({
             name: item.error_type,
             value: item.total_downtime,
             count: item.incident_count || 0,
-            avg: item.total_downtime / (item.incident_count || 1)
+            avg: Math.round(item.total_downtime / (item.incident_count || 1))
           }));
 
           setData(formattedData);
+          initialLoadDone.current = true;
         }
       } catch (err) {
-        console.error("Erreur lors du chargement des données:", err);
+        console.error("Error loading data:", err);
         if (isMounted) {
-          setError("Une erreur est survenue lors du chargement des données");
+          setError("An error occurred while loading the data");
         }
       } finally {
         if (isMounted) {
@@ -88,9 +99,10 @@ const ErrorTypePieChart = ({ filters = {} }) => {
       }
     };
 
+    // Only load data when filters change or on initial load
     loadData();
     
-    // Nettoyage
+    // Cleanup function
     return () => {
       isMounted = false;
     };
@@ -160,9 +172,9 @@ const ErrorTypePieChart = ({ filters = {} }) => {
       return (
         <div className="bg-white p-3 border border-gray-200 rounded shadow-sm">
           <p className="font-medium">{data.name}</p>
-          <p className="text-sm text-gray-600">Temps d'arrêt: {formatDuration(data.value)}</p>
+          <p className="text-sm text-gray-600">Downtime: {formatDuration(data.value)}</p>
           <p className="text-sm text-gray-600">Incidents: {data.count}</p>
-          <p className="text-sm text-gray-600">Moyenne: {formatDuration(data.avg)}</p>
+          <p className="text-sm text-gray-600">Average: {formatDuration(data.avg)}</p>
         </div>
       );
     }
@@ -170,16 +182,17 @@ const ErrorTypePieChart = ({ filters = {} }) => {
   };
   
   const handleRetry = () => {
-    setRetryCount(0); // Reset le compteur de tentatives
+    setRetryCount(0); // Reset retry counter
     setError(null);
     setIsLoading(true);
+    initialLoadDone.current = false; // Force a reload
   };
 
   if (isLoading) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Répartition par type d'erreur</h2>
+          <h2 className="text-lg font-semibold">Error Type Distribution</h2>
         </div>
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
@@ -192,7 +205,7 @@ const ErrorTypePieChart = ({ filters = {} }) => {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Répartition par type d'erreur</h2>
+          <h2 className="text-lg font-semibold">Error Type Distribution</h2>
         </div>
         <div className="text-center py-10 text-red-600">
           <p>{error}</p>
@@ -200,7 +213,7 @@ const ErrorTypePieChart = ({ filters = {} }) => {
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             onClick={handleRetry}
           >
-            Réessayer
+            Retry
           </button>
         </div>
       </div>
@@ -211,10 +224,10 @@ const ErrorTypePieChart = ({ filters = {} }) => {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Répartition par type d'erreur</h2>
+          <h2 className="text-lg font-semibold">Error Type Distribution</h2>
         </div>
         <div className="text-center py-10 text-gray-600">
-          <p>Aucune donnée disponible</p>
+          <p>No data available</p>
         </div>
       </div>
     );
@@ -225,7 +238,7 @@ const ErrorTypePieChart = ({ filters = {} }) => {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
-      <h2 className="text-lg font-semibold mb-4">Répartition par type d'erreur</h2>
+      <h2 className="text-lg font-semibold mb-4">Error Type Distribution</h2>
       <div className="h-96">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -253,16 +266,15 @@ const ErrorTypePieChart = ({ filters = {} }) => {
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4">
         <div className="text-center p-2 bg-blue-50 rounded">
-          <p className="text-sm text-gray-600">Temps d'arrêt total</p>
+          <p className="text-sm text-gray-600">Total Downtime</p>
           <p className="font-semibold">{formatDuration(totalDowntime)}</p>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded">
-          <p className="text-sm text-gray-600">Incidents totaux</p>
+          <p className="text-sm text-gray-600">Total Incidents</p>
           <p className="font-semibold">{totalIncidents}</p>
         </div>
       </div>
     </div>
   );
 };
-
 export default ErrorTypePieChart;

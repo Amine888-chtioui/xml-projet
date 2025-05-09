@@ -1,4 +1,4 @@
-// src/components/MachineDowntimeChart.js - Version corrigée
+// src/components/MachineDowntimeChart.js - Fixed version
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   BarChart, 
@@ -13,24 +13,26 @@ import {
 } from 'recharts';
 import { statsService } from '../services/api';
 
+// Define fallback data outside the component to avoid recreating on each render
+const FALLBACK_DATA = [
+  { machine_id: "ALPHA 158", name: "Komax Alpha 355", total_downtime: 245, incident_count: 12 },
+  { machine_id: "ALPHA 161", name: "Komax Alpha 488 10M", total_downtime: 230, incident_count: 8 },
+  { machine_id: "ALPHA 166", name: "Komax Alpha 488 7M", total_downtime: 140, incident_count: 5 },
+  { machine_id: "ALPHA 146", name: "Komax Alpha 488 S 7M", total_downtime: 85, incident_count: 3 },
+  { machine_id: "ALPHA 176", name: "Komax Alpha 355", total_downtime: 45, incident_count: 2 },
+  { machine_id: "ALPHA 177", name: "KOMAX ALPHA 550", total_downtime: 40, incident_count: 3 }
+];
+
 const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sortOrder, setSortOrder] = useState('desc'); // 'desc' ou 'asc'
+  const [sortOrder, setSortOrder] = useState('desc'); // 'desc' or 'asc'
   const [hoveredBar, setHoveredBar] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
-  // Définir les données de démonstration à utiliser en cas d'erreur
-  const fallbackData = [
-    { machine_id: "ALPHA 158", name: "Komax Alpha 355", total_downtime: 245, incident_count: 12 },
-    { machine_id: "ALPHA 161", name: "Komax Alpha 488 10M", total_downtime: 230, incident_count: 8 },
-    { machine_id: "ALPHA 166", name: "Komax Alpha 488 7M", total_downtime: 140, incident_count: 5 },
-    { machine_id: "ALPHA 146", name: "Komax Alpha 488 S 7M", total_downtime: 85, incident_count: 3 },
-    { machine_id: "ALPHA 176", name: "Komax Alpha 355", total_downtime: 45, incident_count: 2 },
-    { machine_id: "ALPHA 177", name: "KOMAX ALPHA 550", total_downtime: 40, incident_count: 3 }
-  ];
-
+  // Memoize the sort function to prevent recreation on each render
   const sortData = useCallback((dataToSort, order) => {
     return [...dataToSort].sort((a, b) => {
       return order === 'desc' 
@@ -39,70 +41,70 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
     });
   }, []);
 
+  // Format the data for display
+  const formatData = useCallback((rawData) => {
+    return rawData.map(item => ({
+      ...item,
+      downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
+      avg_downtime: Math.round(item.total_downtime / (item.incident_count || 1))
+    }));
+  }, []);
+
+  // Load data from API or use fallback
   useEffect(() => {
     let isMounted = true;
-
+    
     const loadData = async () => {
+      // Skip if we're retrying too many times
       if (retryCount > 2) {
-        // Après 3 tentatives, utiliser les données de démonstration
-        const formattedFallbackData = fallbackData.map(item => ({
-          ...item,
-          downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
-          avg_downtime: Math.round(item.total_downtime / item.incident_count)
-        }));
-        
-        setData(sortData(formattedFallbackData, sortOrder));
-        setIsLoading(false);
-        onDataLoaded(formattedFallbackData);
+        if (isMounted) {
+          // Use fallback data after 3 failed attempts
+          const formattedFallbackData = formatData(FALLBACK_DATA);
+          const sortedData = sortData(formattedFallbackData, sortOrder);
+          setData(sortedData);
+          setIsLoading(false);
+          setInitialLoadDone(true);
+          onDataLoaded(formattedFallbackData);
+        }
         return;
       }
 
       try {
-        setIsLoading(true);
-        setError(null);
+        if (isMounted) {
+          setIsLoading(true);
+          setError(null);
+        }
         
-        // Tentative d'appel API avec délai croissant entre les tentatives
-        let machineData = [];
+        let machineData;
         try {
           const response = await statsService.getStatsByMachine(filters);
           machineData = response?.data || [];
         } catch (apiError) {
           console.error("API error:", apiError);
           
-          // Incrémenter le compteur de tentatives
-          setRetryCount(prevCount => prevCount + 1);
-          
           if (isMounted) {
-            // Utiliser les données de secours en cas d'erreur API
-            machineData = fallbackData;
+            setRetryCount(prev => prev + 1);
+            machineData = FALLBACK_DATA;
           }
         }
         
-        // Vérifier si les données sont vides
+        // Verify we have data
         if (!machineData || machineData.length === 0) {
-          machineData = fallbackData;
+          machineData = FALLBACK_DATA;
         }
         
-        // Trier les données
         if (isMounted) {
-          const sortedData = sortData(machineData, sortOrder);
+          const formattedData = formatData(machineData);
+          const sortedData = sortData(formattedData, sortOrder);
           
-          // Ajouter les données formatées pour l'affichage (temps en heures)
-          const formattedData = sortedData.map(item => ({
-            ...item,
-            downtime_hours: Math.round((item.total_downtime / 60) * 10) / 10,
-            avg_downtime: Math.round(item.total_downtime / item.incident_count || 1)
-          }));
-          
-          setData(formattedData);
-          
-          // Informer le composant parent que les données sont chargées
+          setData(sortedData);
+          setInitialLoadDone(true);
           onDataLoaded(formattedData);
         }
       } catch (err) {
-        console.error("Erreur lors du chargement des données:", err);
+        console.error("Error loading data:", err);
         if (isMounted) {
-          setError("Une erreur est survenue lors du chargement des données");
+          setError("An error occurred while loading the data");
         }
       } finally {
         if (isMounted) {
@@ -111,13 +113,22 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
       }
     };
 
-    loadData();
+    // Only load data if we haven't done the initial load or if the filters or sort order changed
+    if (!initialLoadDone || Object.keys(filters).length > 0) {
+      loadData();
+    }
 
-    // Nettoyage
     return () => {
       isMounted = false;
     };
-  }, [filters, sortOrder, onDataLoaded, sortData, retryCount]);
+  }, [filters, sortOrder, onDataLoaded, formatData, sortData, retryCount, initialLoadDone]);
+
+  // Effect to resort data when sort order changes (without refetching)
+  useEffect(() => {
+    if (data.length > 0) {
+      setData(sortData(data, sortOrder));
+    }
+  }, [sortOrder, sortData, data.length]);
 
   const toggleSortOrder = () => {
     setSortOrder(current => current === 'desc' ? 'asc' : 'desc');
@@ -153,16 +164,17 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
   };
 
   const handleRetry = () => {
-    setRetryCount(0); // Reset le compteur de tentatives
+    setRetryCount(0); // Reset retry counter
     setError(null);
     setIsLoading(true);
+    setInitialLoadDone(false); // Force a reload
   };
 
   if (isLoading) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Temps d'arrêt par machine</h2>
+          <h2 className="text-lg font-semibold">Machine Downtime</h2>
         </div>
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
@@ -175,7 +187,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Temps d'arrêt par machine</h2>
+          <h2 className="text-lg font-semibold">Machine Downtime</h2>
         </div>
         <div className="text-center py-10 text-red-600">
           <p>{error}</p>
@@ -183,7 +195,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             onClick={handleRetry}
           >
-            Réessayer
+            Retry
           </button>
         </div>
       </div>
@@ -194,10 +206,10 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Temps d'arrêt par machine</h2>
+          <h2 className="text-lg font-semibold">Machine Downtime</h2>
         </div>
         <div className="text-center py-10 text-gray-600">
-          <p>Aucune donnée disponible</p>
+          <p>No data available</p>
         </div>
       </div>
     );
@@ -206,13 +218,13 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
   return (
     <div className="bg-white p-6 rounded-lg shadow">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-        <h2 className="text-lg font-semibold">Temps d'arrêt par machine</h2>
+        <h2 className="text-lg font-semibold">Machine Downtime</h2>
         <div className="flex space-x-2 mt-2 sm:mt-0">
           <button 
             onClick={toggleSortOrder}
             className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
           >
-            <span>Trier: {sortOrder === 'desc' ? 'Décroissant' : 'Croissant'}</span>
+            <span>Sort: {sortOrder === 'desc' ? 'Descending' : 'Ascending'}</span>
             <svg 
               className="w-4 h-4 ml-1" 
               fill="none" 
@@ -259,12 +271,12 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
           <Tooltip 
             formatter={(value, name) => {
               if (name === 'total_downtime') {
-                return [formatDuration(value), 'Temps d\'arrêt'];
+                return [formatDuration(value), 'Downtime'];
               }
               return [value, name];
             }}
             labelFormatter={(label) => {
-              // Rechercher l'ID de la machine pour l'afficher avec son nom
+              // Find the machine ID to display with its name
               const item = data.find(d => d.name === label);
               return `${label} (${item?.machine_id || ''})`;
             }}
@@ -281,7 +293,7 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
           <Legend 
             wrapperStyle={{ bottom: 0 }}
             payload={[
-              { value: 'Temps d\'arrêt (minutes)', type: 'rect', color: '#0047AB' }
+              { value: 'Downtime (minutes)', type: 'rect', color: '#0047AB' }
             ]}
           />
           <Bar 
@@ -300,15 +312,15 @@ const MachineDowntimeChart = ({ filters = {}, onDataLoaded = () => {} }) => {
       
       <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="text-center p-2 bg-blue-50 rounded">
-          <p className="text-sm text-gray-600">Incidents totaux</p>
+          <p className="text-sm text-gray-600">Total Incidents</p>
           <p className="font-semibold">{data.reduce((acc, curr) => acc + (curr.incident_count || 0), 0)}</p>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded">
-          <p className="text-sm text-gray-600">Temps d'arrêt total</p>
+          <p className="text-sm text-gray-600">Total Downtime</p>
           <p className="font-semibold">{formatDuration(data.reduce((acc, curr) => acc + (curr.total_downtime || 0), 0))}</p>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded sm:col-span-1 col-span-2">
-          <p className="text-sm text-gray-600">Durée moyenne</p>
+          <p className="text-sm text-gray-600">Average Duration</p>
           <p className="font-semibold">{
             formatDuration(
               Math.round(

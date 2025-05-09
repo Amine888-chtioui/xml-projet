@@ -1,208 +1,193 @@
-// src/services/api.js - Version finale corrigée
+// src/services/api.js - Fixed version
 import axios from 'axios';
 
-// Configuration du délai entre les requêtes pour éviter les erreurs 429 (Too Many Requests)
-const API_REQUEST_DELAY = 800; // ms
+// Configuration for request timing
+const API_REQUEST_DELAY = 1000; // Increased to 1 second to avoid rate limiting
+const MAX_RETRIES = 3;
+const CACHE_TTL = 300000; // 5 minutes
 
-// Fonction utilitaire pour retarder les requêtes
+// Utility function to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Création d'une instance Axios avec une configuration personnalisée
+// Create axios instance
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000/api',
-  timeout: 15000, // Timeout plus long pour les appels lents
+  timeout: 30000, // Increased timeout
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   }
 });
 
-// Sémaphore pour limiter le nombre de requêtes simultanées
-let pendingRequests = 0;
-const MAX_CONCURRENT_REQUESTS = 2;
-const requestQueue = [];
-let isProcessingQueue = false;
+// Simple request deduplication system
+const pendingRequests = new Map();
 
-// Fonction pour traiter la queue de requêtes
-const processQueue = async () => {
-  if (isProcessingQueue || requestQueue.length === 0) return;
-  
-  isProcessingQueue = true;
-  
-  while (requestQueue.length > 0 && pendingRequests < MAX_CONCURRENT_REQUESTS) {
-    pendingRequests++;
-    const { config, resolve, reject } = requestQueue.shift();
-    
-    try {
-      // Effectuer la requête avec axios directement, sans passer par l'instance api
-      // pour éviter une boucle infinie avec les intercepteurs
-      const response = await axios(config);
-      resolve(response);
-    } catch (error) {
-      reject(error);
-    } finally {
-      pendingRequests--;
-      // Pause entre les requêtes pour éviter les erreurs 429
-      await delay(API_REQUEST_DELAY);
-    }
-  }
-  
-  isProcessingQueue = false;
-  
-  // S'il reste des requêtes et que nous sommes sous la limite, relancer le traitement
-  if (requestQueue.length > 0 && pendingRequests < MAX_CONCURRENT_REQUESTS) {
-    processQueue();
-  }
+// Create a request key based on URL and params
+const getRequestKey = (config) => {
+  const { url, params, method = 'get' } = config;
+  return `${method}:${url}:${JSON.stringify(params || {})}`;
 };
 
-// Intercepteur pour ajouter les requêtes à la queue
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    
-    // Retourner une promesse qui sera résolue une fois la requête traitée par la queue
-    return new Promise((resolve, reject) => {
-      // Vérifier si la requête est déjà dans la queue (pour éviter les doublons)
-      const isDuplicate = requestQueue.some(item => 
-        item.config.url === config.url && 
-        JSON.stringify(item.config.params) === JSON.stringify(config.params)
-      );
-      
-      if (!isDuplicate) {
-        requestQueue.push({
-          config,
-          resolve,
-          reject
-        });
-        
-        // Démarrer le traitement de la queue si ce n'est pas déjà fait
-        processQueue();
-      } else {
-        // Si c'est un doublon, rejeter la requête pour éviter les requêtes inutiles
-        reject(new Error('Requête dupliquée ignorée'));
-      }
-    });
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Intercepteur pour gérer les réponses et les erreurs
-api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  (error) => {
-    console.error('API Error:', error);
-    
-    // Si l'erreur est une 404, on peut logger plus de détails
-    if (error.response && error.response.status === 404) {
-      console.error('API 404 Error for URL:', error.config?.url);
-    }
-    
-    // Gérer les erreurs 429 (Too Many Requests)
-    if (error.response && error.response.status === 429) {
-      console.error('API 429 Error: Too Many Requests. Consider reducing request frequency.');
-    }
-    
-    // Gérer les erreurs 401 (non autorisé)
-    if (error.response && error.response.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-      
-      // Rediriger vers la page de connexion si vous utilisez un système de routes
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
-    }
-    
-    return Promise.reject(error);
-  }
-);
-
-// Fonction helper pour exécuter des appels API avec des retry en cas d'échec
-const apiWithRetry = async (apiCall, maxRetries = 3) => {
-  let retries = 0;
-  
-  while (retries < maxRetries) {
-    try {
-      return await apiCall();
-    } catch (error) {
-      // Ignorer les erreurs de requêtes dupliquées
-      if (error.message === 'Requête dupliquée ignorée') {
-        console.log('Requête dupliquée ignorée');
-        throw error; // Ne pas retenter les requêtes dupliquées
-      }
-      
-      retries++;
-      console.log(`Attempt ${retries}/${maxRetries} failed.`);
-      
-      if (retries === maxRetries) {
-        throw error;
-      }
-      
-      // Temps d'attente exponentiel entre les tentatives
-      await delay(Math.pow(2, retries) * 1000);
-    }
-  }
-};
-
-// Fonction utilitaire pour créer un cache simple
+// Utility to create a simple memory cache
 const createCache = () => {
-  const cache = {};
-  const CACHE_TTL = 60000; // 60 secondes
+  const cache = new Map();
   
   return {
     get: (key) => {
-      const item = cache[key];
+      const item = cache.get(key);
       if (!item) return null;
       
-      // Vérifier si le cache est expiré
+      // Check if cache is expired
       if (Date.now() > item.expiry) {
-        delete cache[key];
+        cache.delete(key);
         return null;
       }
       
       return item.value;
     },
-    set: (key, value) => {
-      cache[key] = {
+    set: (key, value, ttl = CACHE_TTL) => {
+      cache.set(key, {
         value,
-        expiry: Date.now() + CACHE_TTL
-      };
-    }
+        expiry: Date.now() + ttl
+      });
+    },
+    clear: () => cache.clear()
   };
 };
 
-// Créer un cache pour les appels API
+// Create cache for API responses
 const apiCache = createCache();
 
-// Fonction helper pour les appels API avec cache
-const apiWithCache = async (cacheKey, apiCall) => {
-  // Vérifier si la réponse est dans le cache
+// Request interceptor
+api.interceptors.request.use(
+  async (config) => {
+    // Add auth token if available
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    // Create a unique key for this request
+    const requestKey = getRequestKey(config);
+    
+    // If there's already a pending request with the same key, reject this one
+    if (pendingRequests.has(requestKey)) {
+      return Promise.reject(new Error('Request already in progress'));
+    }
+    
+    // Add this request to pending requests
+    pendingRequests.set(requestKey, true);
+    
+    // Override the default transformRequest to ensure method is set
+    if (!config.method) {
+      config.method = 'get';
+    }
+    
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor
+api.interceptors.response.use(
+  (response) => {
+    // Clear this request from pending requests
+    const requestKey = getRequestKey(response.config);
+    pendingRequests.delete(requestKey);
+    
+    return response;
+  },
+  (error) => {
+    // Clear this request from pending requests
+    if (error.config) {
+      const requestKey = getRequestKey(error.config);
+      pendingRequests.delete(requestKey);
+    }
+    
+    // Handle specific error cases
+    if (error.response) {
+      // Handle 401 Unauthorized
+      if (error.response.status === 401) {
+        localStorage.removeItem('auth_token');
+      }
+      
+      // Log rate limiting issues but don't show these to the user
+      if (error.response.status === 429) {
+        console.warn('API rate limit reached. Consider reducing request frequency.');
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
+// API helper function with retry logic
+const apiWithRetry = async (apiCallFn, maxRetries = MAX_RETRIES) => {
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      return await apiCallFn();
+    } catch (error) {
+      // Don't retry if we get a "request already in progress" error
+      if (error.message === 'Request already in progress') {
+        throw error;
+      }
+      
+      // Don't retry for certain status codes
+      if (error.response && [401, 403, 404].includes(error.response.status)) {
+        throw error;
+      }
+      
+      retries++;
+      
+      if (retries >= maxRetries) {
+        throw error;
+      }
+      
+      // Wait before retrying with exponential backoff
+      const delayTime = Math.min(1000 * Math.pow(2, retries), 10000);
+      await delay(delayTime);
+    }
+  }
+};
+
+// API helper function with caching
+const apiWithCache = async (cacheKey, apiCallFn, ttl = CACHE_TTL) => {
+  // Check cache first
   const cachedResponse = apiCache.get(cacheKey);
   if (cachedResponse) {
     return cachedResponse;
   }
   
-  // Sinon, faire l'appel API et mettre en cache le résultat
-  const response = await apiWithRetry(apiCall);
-  apiCache.set(cacheKey, response);
+  // If not in cache, make the API call
+  const response = await apiWithRetry(apiCallFn);
+  
+  // Store in cache
+  apiCache.set(cacheKey, response, ttl);
+  
   return response;
 };
 
-// Méthodes d'API spécifiques avec cache et retry
+// Clear all cache
+const clearCache = () => {
+  apiCache.clear();
+};
+
+// Authentication service
 export const authService = {
   login: (credentials) => apiWithRetry(() => api.post('/login', credentials)),
   register: (userData) => apiWithRetry(() => api.post('/register', userData)),
-  logout: () => apiWithRetry(() => api.post('/logout')),
+  logout: () => {
+    localStorage.removeItem('auth_token');
+    return apiWithRetry(() => api.post('/logout'));
+  },
   getUser: () => apiWithRetry(() => api.get('/user')),
 };
 
+// XML upload service
 export const xmlService = {
   uploadXml: (formData, config = {}) => {
     return apiWithRetry(() => api.post('/upload-xml', formData, {
@@ -216,6 +201,7 @@ export const xmlService = {
   getLatestReports: () => apiWithCache('latest-reports', () => api.get('/latest-reports')),
 };
 
+// Statistics service
 export const statsService = {
   getStats: (filters = {}) => {
     const cacheKey = `stats-${JSON.stringify(filters)}`;
@@ -247,6 +233,7 @@ export const statsService = {
   },
 };
 
+// Machine service
 export const machineService = {
   getAllMachines: () => apiWithCache('all-machines', () => api.get('/machines')),
   getMachine: (id) => apiWithCache(`machine-${id}`, () => api.get(`/machines/${id}`)),
@@ -257,6 +244,7 @@ export const machineService = {
   getCommonErrors: (id) => apiWithCache(`common-errors-${id}`, () => api.get(`/machines/${id}/common-errors`)),
 };
 
+// Error code service
 export const errorCodeService = {
   getAllErrorCodes: () => apiWithCache('all-error-codes', () => api.get('/error-codes')),
   getErrorCode: (id) => apiWithCache(`error-code-${id}`, () => api.get(`/error-codes/${id}`)),
@@ -266,6 +254,7 @@ export const errorCodeService = {
   getAffectedMachines: (code) => apiWithCache(`affected-machines-${code}`, () => api.get(`/error-codes/${code}/affected-machines`)),
 };
 
+// Report service
 export const reportService = {
   getAllReports: () => apiWithCache('all-reports', () => api.get('/reports')),
   getReport: (id) => apiWithCache(`report-${id}`, () => api.get(`/reports/${id}`)),
@@ -273,11 +262,21 @@ export const reportService = {
   getReportDetails: (id) => apiWithCache(`report-details-${id}`, () => api.get(`/reports/${id}/details`)),
 };
 
+// Export service
 export const exportService = {
   exportCsv: (filters = {}) => apiWithRetry(() => api.get('/export/csv', { params: filters, responseType: 'blob' })),
   exportExcel: (filters = {}) => apiWithRetry(() => api.get('/export/excel', { params: filters, responseType: 'blob' })),
   exportPdf: (filters = {}) => apiWithRetry(() => api.get('/export/pdf', { params: filters, responseType: 'blob' })),
 };
 
-// Exporter l'instance Axios par défaut pour une utilisation personnalisée
+// Export cache utilities
+export const cacheUtils = {
+  clearAll: clearCache,
+  clearStats: () => {
+    // Clear all stats-related cache entries
+    clearCache();
+  }
+};
+
+// Export the Axios instance for custom use
 export default api;
