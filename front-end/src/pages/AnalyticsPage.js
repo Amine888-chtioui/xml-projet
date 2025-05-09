@@ -1,9 +1,19 @@
 // src/pages/AnalyticsPage.js
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
+import MachineDowntimeChart from '../components/MachineDowntimeChart';
+import BarChartComponent from '../components/BarChartComponent';
 
 const AnalyticsPage = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [dateRange, setDateRange] = useState({
+    startDate: null,
+    endDate: null
+  });
+  const [filters, setFilters] = useState({
+    machine: '',
+    errorType: ''
+  });
   
   useEffect(() => {
     // Simuler un chargement de données
@@ -58,11 +68,9 @@ const AnalyticsPage = () => {
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-4">Temps d'arrêt par machine</h2>
-          <div className="h-64 flex items-center justify-center">
-            <p className="text-gray-500">Graphique à barres sera affiché ici</p>
-          </div>
+        {/* Remplacer le placeholder par notre vrai composant de graphique */}
+        <div className="col-span-1">
+          <MachineDowntimeChart />
         </div>
         
         <div className="bg-white p-6 rounded-lg shadow">
@@ -71,6 +79,18 @@ const AnalyticsPage = () => {
             <p className="text-gray-500">Graphique camembert sera affiché ici</p>
           </div>
         </div>
+      </div>
+      
+      {/* Ajouter un autre graphique à barres pour montrer la flexibilité du composant */}
+      <div className="mt-8">
+        <BarChartComponent 
+          title="Répartition des incidents par type d'erreur" 
+          endpoint="errorTypes"
+          dataKey="Incidents" 
+          nameKey="name"
+          valueKey="incident_count"
+          color="#D32F2F"
+        />
       </div>
       
       <div className="mt-8 bg-white p-6 rounded-lg shadow">
