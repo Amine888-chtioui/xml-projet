@@ -1,6 +1,6 @@
-// src/components/FilterPanel.js - Version finale corrigée
 import React, { useState, useEffect, useRef } from 'react';
 import { statsService } from '../services/api';
+import { toast } from 'react-toastify';
 
 const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
   const [dateRange, setDateRange] = useState({
@@ -9,8 +9,10 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
   });
   const [machineFilter, setMachineFilter] = useState('');
   const [errorTypeFilter, setErrorTypeFilter] = useState('');
+  const [errorCodeFilter, setErrorCodeFilter] = useState('');
   const [machines, setMachines] = useState([]);
   const [errorTypes, setErrorTypes] = useState([]);
+  const [errorCodes, setErrorCodes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState(false);
   
@@ -36,6 +38,14 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
     { id: '3 Pneumatic', name: 'Pneumatique' },
     { id: '6 Maintenance', name: 'Maintenance' },
     { id: '7 Inspection', name: 'Inspection' }
+  ];
+  
+  // Données de démonstration pour les codes d'erreur
+  const defaultErrorCodes = [
+    { id: '01_Breakage', name: 'Breakage' },
+    { id: '02_Wear', name: 'Wear' },
+    { id: '04_Blockage', name: 'Blockage' },
+    { id: '05_Loosening', name: 'Loosening' }
   ];
 
   // Initialiser les dates par défaut (7 derniers jours)
@@ -64,42 +74,83 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
 
   // Chargement des options de filtre
   useEffect(() => {
+    let isMounted = true;
+    setIsLoading(true);
+    setApiError(false);
+    
     const loadFilterOptions = async () => {
-      setIsLoading(true);
-      setApiError(false);
-      
-      // Charger les machines
       try {
-        const machinesResponse = await statsService.getMachines();
-        if (machinesResponse?.data && machinesResponse.data.length > 0) {
-          setMachines(machinesResponse.data);
-        } else {
-          setMachines(defaultMachines);
+        // Charger les machines
+        try {
+          const machinesResponse = await statsService.getMachines();
+          if (isMounted) {
+            if (machinesResponse?.data && machinesResponse.data.length > 0) {
+              setMachines(machinesResponse.data);
+            } else {
+              console.error('Error loading machines: No machine data received');
+              setMachines(defaultMachines);
+              setApiError(true);
+            }
+          }
+        } catch (machineError) {
+          console.error('Error loading machines:', machineError);
+          if (isMounted) {
+            setMachines(defaultMachines);
+            setApiError(true);
+          }
         }
-      } catch (machineError) {
-        console.error('Erreur lors du chargement des machines:', machineError);
-        setMachines(defaultMachines);
-        setApiError(true);
-      }
 
-      // Charger les types d'erreur
-      try {
-        const errorTypesResponse = await statsService.getErrorTypes();
-        if (errorTypesResponse?.data && errorTypesResponse.data.length > 0) {
-          setErrorTypes(errorTypesResponse.data);
-        } else {
-          setErrorTypes(defaultErrorTypes);
+        // Charger les types d'erreur
+        try {
+          const errorTypesResponse = await statsService.getErrorTypes();
+          if (isMounted) {
+            if (errorTypesResponse?.data && errorTypesResponse.data.length > 0) {
+              setErrorTypes(errorTypesResponse.data);
+            } else {
+              console.error('Error loading error types: No error type data received');
+              setErrorTypes(defaultErrorTypes);
+              setApiError(true);
+            }
+          }
+        } catch (errorTypeError) {
+          console.error('Error loading error types:', errorTypeError);
+          if (isMounted) {
+            setErrorTypes(defaultErrorTypes);
+            setApiError(true);
+          }
         }
-      } catch (errorTypeError) {
-        console.error('Erreur lors du chargement des types d\'erreur:', errorTypeError);
-        setErrorTypes(defaultErrorTypes);
-        setApiError(true);
+        
+        // Charger les codes d'erreur
+        try {
+          const errorCodesResponse = await statsService.getErrorCodes();
+          if (isMounted) {
+            if (errorCodesResponse?.data && errorCodesResponse.data.length > 0) {
+              setErrorCodes(errorCodesResponse.data);
+            } else {
+              console.error('Error loading error codes: No error code data received');
+              setErrorCodes(defaultErrorCodes);
+              setApiError(true);
+            }
+          }
+        } catch (errorCodeError) {
+          console.error('Error loading error codes:', errorCodeError);
+          if (isMounted) {
+            setErrorCodes(defaultErrorCodes);
+            setApiError(true);
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-      
-      setIsLoading(false);
     };
 
     loadFilterOptions();
+    
+    return () => {
+      isMounted = false;
+    };
   }, []); // Ne pas inclure onFilterChange dans les dépendances ici
 
   const handleFilterApply = () => {
@@ -107,7 +158,8 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
       start_date: dateRange.startDate || undefined,
       end_date: dateRange.endDate || undefined,
       machine_id: machineFilter || undefined,
-      error_type: errorTypeFilter || undefined
+      error_type: errorTypeFilter || undefined,
+      error_code: errorCodeFilter || undefined
     };
 
     onFilterChange(filters);
@@ -128,6 +180,7 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
     });
     setMachineFilter('');
     setErrorTypeFilter('');
+    setErrorCodeFilter('');
 
     // Appliquer les filtres réinitialisés
     onFilterChange({
@@ -201,6 +254,24 @@ const FilterPanel = ({ onFilterChange, isCollapsed, onToggleCollapse }) => {
               {errorTypes.map((errorType) => (
                 <option key={errorType.id} value={errorType.id}>
                   {errorType.name || errorType.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          {/* Filtre de code d'erreur */}
+          <div className="md:col-span-2 lg:col-span-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Code d'erreur</label>
+            <select
+              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={errorCodeFilter}
+              onChange={(e) => setErrorCodeFilter(e.target.value)}
+              disabled={isLoading}
+            >
+              <option value="">Tous les codes</option>
+              {errorCodes.map((errorCode) => (
+                <option key={errorCode.id} value={errorCode.id}>
+                  {errorCode.name || errorCode.id}
                 </option>
               ))}
             </select>

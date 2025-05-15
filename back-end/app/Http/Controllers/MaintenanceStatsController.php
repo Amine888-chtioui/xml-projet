@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use App\Models\Downtime;
@@ -48,25 +47,48 @@ class MaintenanceStatsController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getSummary()
-    {
-        try {
+    /**
+ * Récupérer un résumé des statistiques pour le dashboard
+ *
+ * @return \Illuminate\Http\JsonResponse
+ */
+public function getSummary()
+{
+    try {
+        $totalIncidents = Downtime::count();
+        $totalDowntime = Downtime::sum('duration_minutes');
+        $avgDowntime = $totalIncidents > 0 ? $totalDowntime / $totalIncidents : 0;
+        $lastUpdated = XmlReport::max('created_at');
+        
+        // Si aucune donnée n'est trouvée, utiliser des données de démonstration
+        if ($totalIncidents === 0) {
             $summary = [
-                'total_incidents' => Downtime::count(),
-                'total_downtime' => Downtime::sum('duration_minutes'),
-                'total_machines' => Machine::count(),
-                'avg_downtime' => Downtime::avg('duration_minutes') ?? 0,
-                'last_updated' => XmlReport::max('created_at'),
+                'total_incidents' => 42, // Exemple de données
+                'total_downtime' => 2550, // 42.5 heures
+                'total_machines' => 8,
+                'avg_downtime' => 60.7, // ~1 heure par incident
+                'last_updated' => now()->toDateTimeString(),
+                'is_demo_data' => true // Indiquer que ce sont des données de démonstration
             ];
-            
-            return response()->json($summary);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erreur lors de la récupération du résumé: ' . $e->getMessage()
-            ], 500);
+        } else {
+            $summary = [
+                'total_incidents' => $totalIncidents,
+                'total_downtime' => $totalDowntime,
+                'total_machines' => Machine::count(),
+                'avg_downtime' => $avgDowntime,
+                'last_updated' => $lastUpdated,
+                'is_demo_data' => false
+            ];
         }
+        
+        return response()->json($summary);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la récupération du résumé: ' . $e->getMessage()
+        ], 500);
     }
+}
     
     /**
      * Récupérer la liste des machines
@@ -346,73 +368,38 @@ class MaintenanceStatsController extends Controller
         try {
             $period = $request->input('period', 'month'); // 'week', 'month', 'quarter', 'year'
             
-            // Déterminer la date de début de la période
-            switch ($period) {
-                case 'week':
-                    $startDate = Carbon::now()->subDays(7)->startOfDay();
-                    $previousStartDate = Carbon::now()->subDays(14)->startOfDay();
-                    break;
-                case 'month':
-                    $startDate = Carbon::now()->subDays(30)->startOfDay();
-                    $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
-                    break;
-                case 'quarter':
-                    $startDate = Carbon::now()->subDays(90)->startOfDay();
-                    $previousStartDate = Carbon::now()->subDays(180)->startOfDay();
-                    break;
-                case 'year':
-                    $startDate = Carbon::now()->subDays(365)->startOfDay();
-                    $previousStartDate = Carbon::now()->subDays(730)->startOfDay();
-                    break;
-                default:
-                    $startDate = Carbon::now()->subDays(30)->startOfDay();
-                    $previousStartDate = Carbon::now()->subDays(60)->startOfDay();
-                    break;
-            }
+            // Utiliser le repository pour obtenir les tendances d'arrêt
+            $trends = $this->maintenanceRepository->getDowntimeTrends($period);
             
-            // Incidents et temps d'arrêt pour la période actuelle
-            $currentStats = Downtime::where('start_time', '>=', $startDate)
-                ->select(
-                    DB::raw('COUNT(*) as incident_count'),
-                    DB::raw('SUM(duration_minutes) as total_downtime')
-                )
-                ->first();
-                
-            // Incidents et temps d'arrêt pour la période précédente
-            $previousStats = Downtime::where('start_time', '>=', $previousStartDate)
-                ->where('start_time', '<', $startDate)
-                ->select(
-                    DB::raw('COUNT(*) as incident_count'),
-                    DB::raw('SUM(duration_minutes) as total_downtime')
-                )
-                ->first();
-                
-            // Calculer les variations
-            $incidentVariation = $previousStats && $previousStats->incident_count > 0
-                ? (($currentStats->incident_count - $previousStats->incident_count) / $previousStats->incident_count) * 100
-                : 0;
-                
-            $downtimeVariation = $previousStats && $previousStats->total_downtime > 0
-                ? (($currentStats->total_downtime - $previousStats->total_downtime) / $previousStats->total_downtime) * 100
-                : 0;
-                
-            // Temps d'arrêt moyen
-            $avgDowntime = $currentStats->incident_count > 0
-                ? $currentStats->total_downtime / $currentStats->incident_count
-                : 0;
-                
-            return response()->json([
-                'period' => $period,
-                'incident_count' => $currentStats->incident_count,
-                'total_downtime' => $currentStats->total_downtime,
-                'avg_downtime' => $avgDowntime,
-                'incident_variation' => round($incidentVariation, 2),
-                'downtime_variation' => round($downtimeVariation, 2),
-            ]);
+            return response()->json($trends);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des indicateurs de performance: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Obtenir des statistiques par période temporelle (jour, semaine, mois, année)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getStatsByPeriod(Request $request)
+    {
+        try {
+            $period = $request->input('period', 'day'); // 'day', 'week', 'month', 'year'
+            $filters = $this->getFiltersFromRequest($request);
+            
+            // Obtenir les statistiques par période
+            $stats = $this->maintenanceRepository->getStatsByPeriod($period, $filters);
+            
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques par période: ' . $e->getMessage()
             ], 500);
         }
     }

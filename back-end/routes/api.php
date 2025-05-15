@@ -31,6 +31,9 @@ Route::middleware('api')->group(function () {
     Route::get('/maintenance-stats/by-error-type', [MaintenanceStatsController::class, 'getStatsByErrorType']);
     Route::get('/maintenance-stats/critical-issues', [MaintenanceStatsController::class, 'getCriticalIssues']);
     
+    // Nouvelle route pour les statistiques temporelles
+    Route::get('/maintenance-stats/by-period', [MaintenanceStatsController::class, 'getStatsByPeriod']);
+    
     // Routes pour le tableau de bord
     Route::get('/dashboard-stats', [MaintenanceStatsController::class, 'getDashboardStats']);
     Route::get('/performance-indicators', [MaintenanceStatsController::class, 'getPerformanceIndicators']);

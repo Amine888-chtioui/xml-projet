@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/XmlUploadController.php
 namespace App\Http\Controllers;
 
 use App\Models\XmlReport;
@@ -7,6 +6,7 @@ use App\Services\XmlParserService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 
 class XmlUploadController extends Controller
 {
@@ -17,6 +17,12 @@ class XmlUploadController extends Controller
         $this->xmlParserService = $xmlParserService;
     }
 
+    /**
+     * Upload and process an XML file
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function upload(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -26,7 +32,7 @@ class XmlUploadController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation échouée',
+                'message' => 'Validation failed',
                 'errors' => $validator->errors()
             ], 422);
         }
@@ -36,11 +42,12 @@ class XmlUploadController extends Controller
         $path = $file->store('xml_uploads');
 
         try {
+            // Parse the XML file
             $parsedData = $this->xmlParserService->parseXmlFile(Storage::path($path));
             
-            // Sauvegarder l'entrée dans la table des rapports
+            // Save report entry in the database
             $report = XmlReport::create([
-                'name' => $originalName,
+                'name' => $parsedData['reportInfo']['title'] ?? $originalName,
                 'file_path' => $path,
                 'file_name' => $originalName,
                 'file_size' => $file->getSize(),
@@ -51,21 +58,29 @@ class XmlUploadController extends Controller
             
             return response()->json([
                 'success' => true,
-                'message' => 'Fichier XML traité avec succès',
-                'data' => $parsedData,
-                'report_id' => $report->id
+                'message' => 'XML file processed successfully',
+                'data' => [
+                    'report_id' => $report->id,
+                    'report_name' => $report->name,
+                    'incident_count' => $report->incident_count,
+                    'total_downtime_minutes' => $report->total_downtime_minutes,
+                    'created_at' => $report->created_at,
+                    'summary' => $parsedData['summary']
+                ]
             ]);
         } catch (\Exception $e) {
+            Log::error('Error processing XML file: ' . $e->getMessage());
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors du traitement du fichier XML',
+                'message' => 'Error processing XML file',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
     
     /**
-     * Récupérer l'historique des uploads
+     * Get upload history
      *
      * @return \Illuminate\Http\JsonResponse
      */
@@ -83,23 +98,31 @@ class XmlUploadController extends Controller
                 ->orderBy('created_at', 'desc')
                 ->get();
                 
-            return response()->json($reports);
+            return response()->json([
+                'success' => true,
+                'data' => $reports
+            ]);
         } catch (\Exception $e) {
+            Log::error('Error retrieving upload history: ' . $e->getMessage());
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la récupération de l\'historique des uploads: ' . $e->getMessage()
+                'message' => 'Error retrieving upload history: ' . $e->getMessage()
             ], 500);
         }
     }
     
     /**
-     * Récupérer les rapports récents
+     * Get recent reports
      *
+     * @param int $limit Number of reports to retrieve
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getLatestReports()
+    public function getLatestReports(Request $request)
     {
         try {
+            $limit = $request->input('limit', 5);
+            
             $reports = XmlReport::select(
                     'id', 
                     'name', 
@@ -108,14 +131,89 @@ class XmlUploadController extends Controller
                     'created_at'
                 )
                 ->orderBy('created_at', 'desc')
-                ->limit(5)
+                ->limit($limit)
                 ->get();
                 
-            return response()->json($reports);
+            return response()->json([
+                'success' => true,
+                'data' => $reports
+            ]);
         } catch (\Exception $e) {
+            Log::error('Error retrieving latest reports: ' . $e->getMessage());
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la récupération des rapports récents: ' . $e->getMessage()
+                'message' => 'Error retrieving latest reports: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Get report details
+     *
+     * @param int $id Report ID
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getReportDetails($id)
+    {
+        try {
+            $report = XmlReport::findOrFail($id);
+            
+            // Parse summary data
+            $summaryData = json_decode($report->summary_data, true) ?? [];
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $report->id,
+                    'name' => $report->name,
+                    'file_name' => $report->file_name,
+                    'file_size' => $report->file_size,
+                    'incident_count' => $report->incident_count,
+                    'total_downtime_minutes' => $report->total_downtime_minutes,
+                    'created_at' => $report->created_at,
+                    'summary' => $summaryData
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving report details: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving report details: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Delete a report and associated data
+     *
+     * @param int $id Report ID
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function deleteReport($id)
+    {
+        try {
+            $report = XmlReport::findOrFail($id);
+            
+            // Delete the file
+            if (Storage::exists($report->file_path)) {
+                Storage::delete($report->file_path);
+            }
+            
+            // Delete the report
+            $report->delete();
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Report deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error deleting report: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error deleting report: ' . $e->getMessage()
             ], 500);
         }
     }

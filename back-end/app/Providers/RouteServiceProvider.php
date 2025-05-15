@@ -37,12 +37,12 @@ class RouteServiceProvider extends ServiceProvider
                 ->group(base_path('routes/web.php'));
             
             // Désactiver les limitations CORS pour les requêtes API pendant le développement
-            if (app()->environment('local')) {
-                header('Access-Control-Allow-Origin: *');
-                header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-                header('Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, X-Request-With');
-                header('Access-Control-Allow-Credentials: true');
-            }
+            // if (app()->environment('local')) {
+            //     header('Access-Control-Allow-Origin: *');
+            //     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+            //     header('Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, X-Request-With');
+            //     header('Access-Control-Allow-Credentials: true');
+            // }
         });
     }
 
