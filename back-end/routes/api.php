@@ -18,6 +18,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('api')->group(function () {
     // Routes d'upload XML
     Route::post('/upload-xml', [XmlUploadController::class, 'upload']);
+    Route::get('/upload-history', [XmlUploadController::class, 'getUploadHistory']);
+    Route::get('/latest-reports', [XmlUploadController::class, 'getLatestReports']);
+    Route::get('/reports/{id}', [XmlUploadController::class, 'getReportDetails']);
+    Route::delete('/reports/{id}', [XmlUploadController::class, 'deleteReport']);
     
     // Routes de statistiques générales
     Route::get('/maintenance-stats', [MaintenanceStatsController::class, 'getStats']);
@@ -38,7 +42,12 @@ Route::middleware('api')->group(function () {
     Route::get('/dashboard-stats', [MaintenanceStatsController::class, 'getDashboardStats']);
     Route::get('/performance-indicators', [MaintenanceStatsController::class, 'getPerformanceIndicators']);
     
-    // Routes pour l'historique des rapports
-    Route::get('/upload-history', [XmlUploadController::class, 'getUploadHistory']);
-    Route::get('/latest-reports', [XmlUploadController::class, 'getLatestReports']);
+    // Routes pour les machines
+    Route::get('/machines', [MaintenanceStatsController::class, 'getMachines']);
+    Route::get('/machines/{id}', [MaintenanceStatsController::class, 'getMachineDetails']);
+    Route::get('/machines/{id}/downtime-history', [MaintenanceStatsController::class, 'getMachineDowntimeHistory']);
+    Route::get('/machines/{id}/common-errors', [MaintenanceStatsController::class, 'getMachineCommonErrors']);
+    
+    // Routes pour les codes d'erreur
+    Route::get('/error-codes', [MaintenanceStatsController::class, 'getErrorCodes']);
 });

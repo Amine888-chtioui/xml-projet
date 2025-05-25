@@ -1,4 +1,4 @@
-// src/components/TimeEvolutionChart.js - Version améliorée
+// src/components/TemporalStatsChart.js - Version corrigée
 import React, { useState, useEffect } from "react";
 import {
   LineChart,
@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import { statsService } from "../services/api";
 
-const TimeEvolutionChart = ({ filters = {} }) => {
+const TemporalStatsChart = ({ filters = {} }) => {
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,8 +58,16 @@ const TimeEvolutionChart = ({ filters = {} }) => {
         let timeData = [];
         try {
           const response = await statsService.getTimeEvolution(newFilters);
-          if (response?.data) {
+          console.log('Time evolution response:', response); // Debug
+          
+          // Vérifier la structure de la réponse
+          if (response?.data?.success && response.data.data) {
+            timeData = response.data.data;
+          } else if (response?.data && Array.isArray(response.data)) {
             timeData = response.data;
+          } else {
+            console.warn('Unexpected response structure:', response);
+            timeData = fallbackData;
           }
         } catch (apiError) {
           console.error("API error:", apiError);
@@ -70,8 +78,9 @@ const TimeEvolutionChart = ({ filters = {} }) => {
           timeData = fallbackData;
         }
 
-        // Si aucune donnée n'a été trouvée, utiliser les données de secours
-        if (!timeData || timeData.length === 0) {
+        // Si aucune donnée n'a été trouvée ou si les données ne sont pas un tableau, utiliser les données de secours
+        if (!timeData || !Array.isArray(timeData) || timeData.length === 0) {
+          console.warn('No valid data received, using fallback data');
           timeData = fallbackData;
         }
 
@@ -85,10 +94,10 @@ const TimeEvolutionChart = ({ filters = {} }) => {
                 day: "2-digit",
                 month: "2-digit",
               }),
-              total_downtime: item.total_downtime,
-              incident_count: item.incident_count,
+              total_downtime: Number(item.total_downtime) || 0,
+              incident_count: Number(item.incident_count) || 0,
               avg_downtime: Math.round(
-                item.total_downtime / (item.incident_count || 1)
+                (Number(item.total_downtime) || 0) / (Number(item.incident_count) || 1)
               ),
             };
           });
@@ -120,7 +129,6 @@ const TimeEvolutionChart = ({ filters = {} }) => {
               month: "2-digit",
             }),
             total_downtime: item.total_downtime,
-            // src/components/TimeEvolutionChart.js (suite)
             incident_count: item.incident_count,
             avg_downtime: Math.round(
               item.total_downtime / (item.incident_count || 1)
@@ -230,14 +238,14 @@ const TimeEvolutionChart = ({ filters = {} }) => {
 
   // Calculer les totaux
   const totalDowntime = data.reduce(
-    (sum, item) => sum + item.total_downtime,
+    (sum, item) => sum + (item.total_downtime || 0),
     0
   );
   const totalIncidents = data.reduce(
-    (sum, item) => sum + item.incident_count,
+    (sum, item) => sum + (item.incident_count || 0),
     0
   );
-  const avgDowntime = Math.round(totalDowntime / totalIncidents) || 0;
+  const avgDowntime = Math.round(totalDowntime / (totalIncidents || 1));
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
@@ -357,4 +365,4 @@ const TimeEvolutionChart = ({ filters = {} }) => {
   );
 };
 
-export default TimeEvolutionChart;
+export default TemporalStatsChart;

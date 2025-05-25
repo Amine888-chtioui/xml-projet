@@ -25,6 +25,7 @@ class Kernel extends HttpKernel
         // Assurez-vous que notre middleware CORS est bien placé ici
         \App\Http\Middleware\Cors::class,
     ];
+    
     /**
      * The application's route middleware groups.
      *
@@ -41,6 +42,8 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
+            // Ajouter le middleware de gestion d'erreurs API
+            \App\Http\Middleware\ApiErrorHandler::class,
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \Illuminate\Routing\Middleware\ThrottleRequests::class.':api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,

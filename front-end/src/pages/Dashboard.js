@@ -1,4 +1,4 @@
-// src/pages/Dashboard.js - Mise à jour pour inclure l'analyse temporelle
+// src/pages/Dashboard.js - Version corrigée
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { statsService, reportService } from "../services/api";
@@ -12,7 +12,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import TemporalStatsChart from "../components/TemporalStatsChart"; // Nouveau composant
+import TemporalStatsChart from "../components/TemporalStatsChart";
 
 const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -25,35 +25,43 @@ const Dashboard = () => {
   const [topMachines, setTopMachines] = useState([]);
   const [topErrorTypes, setTopErrorTypes] = useState([]);
   const [recentReports, setRecentReports] = useState([]);
+  const [apiError, setApiError] = useState(false);
 
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
         setIsLoading(true);
+        setApiError(false);
 
         // Charger les données du tableau de bord
-        const response = await statsService.getDashboardStats();
+        try {
+          const response = await statsService.getDashboardStats();
 
-        if (response?.data) {
-          const { summary, by_machine, by_error_type, time_evolution } =
-            response.data;
+          if (response?.data?.data) {
+            const { summary, by_machine, by_error_type } = response.data.data;
 
-          // Mettre à jour les données de résumé
-          setSummaryData({
-            total_incidents: summary.total_incidents || 0,
-            total_downtime: summary.total_downtime || 0,
-            avg_downtime: summary.total_incidents
-              ? Math.round(summary.total_downtime / summary.total_incidents)
-              : 0,
-            estimated_cost: Math.round((summary.total_downtime / 60) * 100), // 100€ par heure
-          });
+            // Mettre à jour les données de résumé
+            setSummaryData({
+              total_incidents: summary?.total_incidents || 0,
+              total_downtime: summary?.total_downtime || 0,
+              avg_downtime: summary?.total_incidents
+                ? Math.round(summary.total_downtime / summary.total_incidents)
+                : 0,
+              estimated_cost: Math.round((summary?.total_downtime || 0) / 60 * 100), // 100€ par heure
+            });
 
-          // Mettre à jour les principales machines
-          setTopMachines(by_machine || []);
+            // Mettre à jour les principales machines
+            setTopMachines(by_machine || []);
 
-          // Mettre à jour les principaux types d'erreur
-          setTopErrorTypes(by_error_type || []);
-        } else {
+            // Mettre à jour les principaux types d'erreur
+            setTopErrorTypes(by_error_type || []);
+          } else {
+            throw new Error('No data received from dashboard API');
+          }
+        } catch (dashboardError) {
+          console.error("Erreur API dashboard:", dashboardError);
+          setApiError(true);
+          
           // Données de démonstration
           setSummaryData({
             total_incidents: 42,
@@ -122,48 +130,41 @@ const Dashboard = () => {
         // Charger les rapports récents
         try {
           const reportsResponse = await reportService.getLatestReports();
-          if (reportsResponse?.data) {
-            setRecentReports(reportsResponse.data);
+          if (reportsResponse?.data?.data) {
+            setRecentReports(reportsResponse.data.data);
           } else {
-            // Données de démonstration pour les rapports récents
-            setRecentReports([
-              {
-                id: 1,
-                name: "Rapport de maintenance Avril 2025",
-                created_at: "2025-05-09T10:15:30Z",
-                incident_count: 15,
-                total_downtime_minutes: 840,
-              },
-              {
-                id: 2,
-                name: "Rapport d'arrêts semaine 18",
-                created_at: "2025-05-05T14:22:15Z",
-                incident_count: 12,
-                total_downtime_minutes: 720,
-              },
-              {
-                id: 3,
-                name: "Maintenance préventive machines série A",
-                created_at: "2025-04-28T09:45:22Z",
-                incident_count: 8,
-                total_downtime_minutes: 480,
-              },
-            ]);
+            throw new Error('No reports data received');
           }
-        } catch (error) {
-          console.error(
-            "Erreur lors du chargement des rapports récents:",
-            error
-          );
-          // Utiliser des données de démonstration en cas d'erreur
-          setRecentReports([]);
+        } catch (reportsError) {
+          console.error("Erreur lors du chargement des rapports récents:", reportsError);
+          // Données de démonstration pour les rapports récents
+          setRecentReports([
+            {
+              id: 1,
+              name: "Rapport de maintenance Avril 2025",
+              created_at: "2025-05-09T10:15:30Z",
+              incident_count: 15,
+              total_downtime_minutes: 840,
+            },
+            {
+              id: 2,
+              name: "Rapport d'arrêts semaine 18",
+              created_at: "2025-05-05T14:22:15Z",
+              incident_count: 12,
+              total_downtime_minutes: 720,
+            },
+            {
+              id: 3,
+              name: "Maintenance préventive machines série A",
+              created_at: "2025-04-28T09:45:22Z",
+              incident_count: 8,
+              total_downtime_minutes: 480,
+            },
+          ]);
         }
       } catch (error) {
-        console.error(
-          "Erreur lors du chargement des données du tableau de bord:",
-          error
-        );
-        // Utiliser des données de démonstration en cas d'erreur
+        console.error("Erreur lors du chargement des données du tableau de bord:", error);
+        setApiError(true);
       } finally {
         setIsLoading(false);
       }
@@ -232,55 +233,79 @@ const Dashboard = () => {
         </Link>
       </div>
 
+      {/* Messages d'avertissement */}
+      {apiError && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+          <p className="flex items-center">
+            <svg
+              className="w-5 h-5 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              ></path>
+            </svg>
+            Certaines données n'ont pas pu être chargées depuis le serveur. 
+            Nous affichons des données d'exemple.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
         <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
           <h3 className="text-sm font-medium text-blue-800">
             Nombre total d'incidents
           </h3>
-          <p className="mt-1 text-3xl font-semibold text-blue-900">
-            {isLoading ? (
-              <div className="animate-pulse h-8 w-16 bg-blue-200 rounded"></div>
-            ) : (
-              summaryData.total_incidents
-            )}
-          </p>
+          {isLoading ? (
+            <div className="mt-1 animate-pulse h-8 w-16 bg-blue-200 rounded"></div>
+          ) : (
+            <div className="mt-1 text-3xl font-semibold text-blue-900">
+              {summaryData.total_incidents}
+            </div>
+          )}
         </div>
 
         <div className="bg-red-50 p-4 rounded-lg border-l-4 border-red-500">
           <h3 className="text-sm font-medium text-red-800">
             Temps d'arrêt total
           </h3>
-          <p className="mt-1 text-3xl font-semibold text-red-900">
-            {isLoading ? (
-              <div className="animate-pulse h-8 w-24 bg-red-200 rounded"></div>
-            ) : (
-              formatDuration(summaryData.total_downtime)
-            )}
-          </p>
+          {isLoading ? (
+            <div className="mt-1 animate-pulse h-8 w-24 bg-red-200 rounded"></div>
+          ) : (
+            <div className="mt-1 text-3xl font-semibold text-red-900">
+              {formatDuration(summaryData.total_downtime)}
+            </div>
+          )}
         </div>
 
         <div className="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
           <h3 className="text-sm font-medium text-green-800">
             Durée moyenne par incident
           </h3>
-          <p className="mt-1 text-3xl font-semibold text-green-900">
-            {isLoading ? (
-              <div className="animate-pulse h-8 w-16 bg-green-200 rounded"></div>
-            ) : (
-              formatDuration(summaryData.avg_downtime)
-            )}
-          </p>
+          {isLoading ? (
+            <div className="mt-1 animate-pulse h-8 w-16 bg-green-200 rounded"></div>
+          ) : (
+            <div className="mt-1 text-3xl font-semibold text-green-900">
+              {formatDuration(summaryData.avg_downtime)}
+            </div>
+          )}
         </div>
 
         <div className="bg-yellow-50 p-4 rounded-lg border-l-4 border-yellow-500">
           <h3 className="text-sm font-medium text-yellow-800">Coût estimé</h3>
-          <p className="mt-1 text-3xl font-semibold text-yellow-900">
-            {isLoading ? (
-              <div className="animate-pulse h-8 w-20 bg-yellow-200 rounded"></div>
-            ) : (
-              `${summaryData.estimated_cost.toLocaleString()} €`
-            )}
-          </p>
+          {isLoading ? (
+            <div className="mt-1 animate-pulse h-8 w-20 bg-yellow-200 rounded"></div>
+          ) : (
+            <div className="mt-1 text-3xl font-semibold text-yellow-900">
+              {`${summaryData.estimated_cost.toLocaleString()} €`}
+            </div>
+          )}
         </div>
       </div>
 
